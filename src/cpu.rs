@@ -29,6 +29,16 @@ pub enum AddressingMode {
     NoneAddressing,
 }
 
+enum NesFlags {
+    Carry = 0b0000_0001,
+    Zero = 0b0000_0010,
+    InterruptDisable = 0b0000_0100,
+    Decimal = 0b0000_1000,
+    FourthBit = 0b0001_0000,
+    FifthBit = 0b0010_0000,
+    Overflow = 0b0100_0000,
+    Negative = 0b1000_0000,
+}
 impl CPU {
     pub fn new() -> Self {
         CPU {
@@ -48,6 +58,29 @@ impl CPU {
 
     fn mem_write(&mut self, addr: u16, data: u8) {
         self.memory[addr as usize] = data;
+    }
+
+    fn stack_pop(&mut self) -> u8 {
+        self.sp = self.sp.wrapping_add(1);
+        self.mem_read(0x0100 + self.sp as u16)
+    }
+
+    fn stack_push(&mut self, data: u8) {
+        self.mem_write(0x0100 + self.sp as u16, data);
+        self.sp = self.sp.wrapping_sub(1);
+    }
+
+    fn stack_pop_u16(&mut self) -> u16 {
+        let lo = self.stack_pop();
+        let hi = self.stack_pop();
+
+        let addr = (hi as u16) << 8 | lo as u16;
+        addr
+    }
+
+    fn stack_push_u16(&mut self, data: u16) {
+        self.stack_push((data >> 8) as u8);
+        self.stack_push((data & 0xff) as u8);
     }
 
     fn mem_read_u16(&mut self, pos: u16) -> u16 {
@@ -70,6 +103,7 @@ impl CPU {
         self.pc = self.mem_read_u16(0xfffc);
     }
 
+    // TODO: Make the current test pass.
     fn load(&mut self, program: Vec<u8>) {
         self.memory[0x8000..(0x8000 + program.len())].copy_from_slice(&program[..]);
         self.mem_write_u16(0xfffc, 0x8000);
@@ -88,6 +122,7 @@ impl CPU {
             let cur_op = self.mem_read(self.pc);
             self.pc += 1;
             let pc_state = self.pc;
+            println!("HERE: {:x}, PC: {:x}", cur_op, self.pc);
 
             let opcode = opcodes
                 .get(&cur_op)
@@ -259,7 +294,6 @@ impl CPU {
                 0xEA => {
                     self.nop();
                 }
-
                 _ => todo!(),
             }
 
@@ -336,97 +370,295 @@ impl CPU {
         self.y -= 1;
         self.update_zero_and_negative_flags(self.x);
     }
+    fn is_bit_set(&self, value: u8, bit_pos: NesFlags) -> bool {
+        value & (bit_pos as u8) != 0
+    }
 
+    fn is_bit_clear(&self, value: u8, bit_pos: NesFlags) -> bool {
+        value & (bit_pos as u8) == 0
+    }
+
+    fn is_flag_set(&self, bit_pos: NesFlags) -> bool {
+        self.stat_reg & (bit_pos as u8) != 0
+    }
+
+    fn is_flag_clear(&self, bit_pos: NesFlags) -> bool {
+        self.stat_reg & (bit_pos as u8) == 0
+    }
+
+    fn flag_set(&mut self, bit_pos: NesFlags) {
+        self.stat_reg = self.stat_reg | bit_pos as u8;
+    }
+
+    fn flag_clear(&mut self, bit_pos: NesFlags) {
+        self.stat_reg = self.stat_reg & bit_pos as u8;
+    }
     fn bcc(&mut self) {
         let offset = self.mem_read(self.pc + 1) as i8;
-        let new_pc = self.pc.wrapping_add(2).wrapping_add(offset as u16);
+
+        if self.is_flag_clear(NesFlags::Carry) {
+            // let new_pc = self.pc.wrapping_add(2).wrapping_add(offset as u16);
+            let new_pc = self.pc.wrapping_add(offset as u16);
+            self.pc = new_pc;
+        }
     }
     fn bcs(&mut self) {
-        todo!()
+        let offset = self.mem_read(self.pc + 1) as i8;
+
+        if self.is_flag_set(NesFlags::Carry) {
+            // let new_pc = self.pc.wrapping_add(2).wrapping_add(offset as u16);
+            let new_pc = self.pc.wrapping_add(offset as u16);
+            self.pc = new_pc;
+        }
     }
     fn beq(&mut self) {
-        todo!()
+        let offset = self.mem_read(self.pc + 1) as i8;
+
+        if self.is_flag_set(NesFlags::Zero) {
+            // let new_pc = self.pc.wrapping_add(2).wrapping_add(offset as u16);
+            let new_pc = self.pc.wrapping_add(offset as u16);
+            self.pc = new_pc;
+        }
     }
     fn bne(&mut self) {
-        todo!()
+        let offset = self.mem_read(self.pc + 1) as i8;
+
+        if self.is_flag_clear(NesFlags::Zero) {
+            // let new_pc = self.pc.wrapping_add(2).wrapping_add(offset as u16);
+            let new_pc = self.pc.wrapping_add(offset as u16);
+            self.pc = new_pc;
+        }
     }
     fn bpl(&mut self) {
-        todo!()
+        let offset = self.mem_read(self.pc + 1) as i8;
+
+        if self.is_flag_clear(NesFlags::Negative) {
+            // let new_pc = self.pc.wrapping_add(2).wrapping_add(offset as u16);
+            let new_pc = self.pc.wrapping_add(offset as u16);
+            self.pc = new_pc;
+        }
     }
     fn bmi(&mut self) {
-        todo!()
+        let offset = self.mem_read(self.pc + 1) as i8;
+
+        if self.is_flag_set(NesFlags::Negative) {
+            // let new_pc = self.pc.wrapping_add(2).wrapping_add(offset as u16);
+            let new_pc = self.pc.wrapping_add(offset as u16);
+            self.pc = new_pc;
+        }
     }
     fn bvc(&mut self) {
-        todo!()
+        let offset = self.mem_read(self.pc + 1) as i8;
+
+        if self.is_flag_clear(NesFlags::Overflow) {
+            // let new_pc = self.pc.wrapping_add(2).wrapping_add(offset as u16);
+            let new_pc = self.pc.wrapping_add(offset as u16);
+            self.pc = new_pc;
+        }
     }
     fn bvs(&mut self) {
-        todo!()
+        let offset = self.mem_read(self.pc + 1) as i8;
+
+        if self.is_flag_set(NesFlags::Overflow) {
+            // let new_pc = self.pc.wrapping_add(2).wrapping_add(offset as u16);
+            let new_pc = self.pc.wrapping_add(offset as u16);
+            self.pc = new_pc;
+        }
     }
+
     fn jsr(&mut self) {
-        todo!()
+        self.stack_push_u16(self.pc);
+        let addr = self.mem_read_u16(self.pc);
+        self.pc = addr;
     }
     fn rts(&mut self) {
-        todo!()
+        let addr = self.stack_pop_u16();
+        self.pc = addr.wrapping_add(1);
     }
     fn rti(&mut self) {
         todo!()
     }
     fn pha(&mut self) {
-        todo!()
+        self.stack_push(self.a);
     }
     fn pla(&mut self) {
-        todo!()
+        self.a = self.stack_pop();
+
+        self.update_zero_and_negative_flags(self.a);
     }
     fn php(&mut self) {
-        todo!()
+        self.stack_push(self.stat_reg);
     }
     fn plp(&mut self) {
-        todo!()
+        self.stat_reg = self.stack_pop();
     }
     fn txs(&mut self) {
-        todo!()
+        self.sp = self.x;
     }
+
     fn tsx(&mut self) {
-        todo!()
+        self.x = self.stack_pop();
+
+        self.update_zero_and_negative_flags(self.x);
     }
+
     fn clc(&mut self) {
-        todo!()
+        self.flag_clear(NesFlags::Carry);
     }
     fn sec(&mut self) {
-        todo!()
+        self.flag_set(NesFlags::Carry);
+        // self.stat_reg = self.stat_reg | (NesFlags::Carry as u8);
     }
     fn cli(&mut self) {
+        // delay instruction update
         todo!()
     }
     fn sei(&mut self) {
+        // delay instruction update
         todo!()
     }
     fn cld(&mut self) {
-        todo!()
+        self.flag_clear(NesFlags::Decimal);
     }
     fn sed(&mut self) {
-        todo!()
+        self.flag_set(NesFlags::Decimal);
+        // self.stat_reg = self.stat_reg | (NesFlags::Decimal as u8);
     }
     fn clv(&mut self) {
-        todo!()
+        self.flag_clear(NesFlags::Overflow);
     }
     fn nop(&mut self) {
         todo!()
     }
     fn asl(&mut self, mode: &AddressingMode) {
-        todo!()
+        if let AddressingMode::Accumulator = mode {
+            if self.is_bit_set(self.a, NesFlags::Negative) {
+                self.flag_set(NesFlags::Carry);
+            } else {
+                self.flag_clear(NesFlags::Carry);
+            }
+
+            self.a = self.a << 1;
+
+            self.update_zero_and_negative_flags(self.a);
+        } else {
+            let addr = self.get_operand_address(mode);
+            let data = self.mem_read(addr);
+
+            self.mem_write(addr, data << 1);
+
+            if self.is_bit_set(data, NesFlags::Negative) {
+                self.flag_set(NesFlags::Carry);
+            } else {
+                self.flag_clear(NesFlags::Carry);
+            }
+
+            self.update_zero_and_negative_flags(data << 1);
+        }
     }
 
     fn lsr(&mut self, mode: &AddressingMode) {
-        todo!()
+        if let AddressingMode::Accumulator = mode {
+            if self.is_bit_set(self.a, NesFlags::Carry) {
+                self.flag_set(NesFlags::Carry);
+            } else {
+                self.flag_clear(NesFlags::Carry);
+            }
+
+            self.a = self.a >> 1;
+
+            if self.a == 0 {
+                self.flag_set(NesFlags::Zero);
+            } else {
+                self.flag_clear(NesFlags::Zero);
+            }
+
+            self.flag_clear(NesFlags::Negative);
+        } else {
+            let addr = self.get_operand_address(mode);
+            let data = self.mem_read(addr);
+            let result = data >> 1;
+
+            self.mem_write(addr, result);
+
+            if self.is_bit_set(data, NesFlags::Carry) {
+                self.flag_set(NesFlags::Carry);
+            } else {
+                self.flag_clear(NesFlags::Carry);
+            }
+
+            if result == 0 {
+                self.flag_set(NesFlags::Zero);
+            } else {
+                self.flag_clear(NesFlags::Zero);
+            }
+
+            self.flag_clear(NesFlags::Negative);
+        }
     }
 
     fn rol(&mut self, mode: &AddressingMode) {
-        todo!()
+        if let AddressingMode::Accumulator = mode {
+            if self.is_bit_set(self.a, NesFlags::Negative) {
+                self.flag_set(NesFlags::Carry);
+            } else {
+                self.flag_clear(NesFlags::Carry);
+            }
+
+            self.a = self.a << 1;
+            if self.is_flag_set(NesFlags::Carry) {
+                self.a = self.a | NesFlags::Carry as u8;
+            }
+
+            self.update_zero_and_negative_flags(self.a);
+        } else {
+            let addr = self.get_operand_address(mode);
+            let data = self.mem_read(addr);
+            let mut result = data << 1;
+
+            self.mem_write(addr, result);
+
+            if self.is_bit_set(data, NesFlags::Negative) {
+                self.flag_set(NesFlags::Carry);
+                result = result | NesFlags::Carry as u8;
+            } else {
+                self.flag_clear(NesFlags::Carry);
+            }
+
+            self.update_zero_and_negative_flags(result);
+        }
     }
 
     fn ror(&mut self, mode: &AddressingMode) {
-        todo!()
+        if let AddressingMode::Accumulator = mode {
+            if self.is_bit_set(self.a, NesFlags::Carry) {
+                self.flag_set(NesFlags::Carry);
+            } else {
+                self.flag_clear(NesFlags::Carry);
+            }
+
+            self.a = self.a >> 1;
+            if self.is_flag_set(NesFlags::Carry) {
+                self.a = self.a | NesFlags::Carry as u8;
+            }
+
+            self.update_zero_and_negative_flags(self.a);
+        } else {
+            let addr = self.get_operand_address(mode);
+            let data = self.mem_read(addr);
+            let mut result = data >> 1;
+
+            self.mem_write(addr, result);
+
+            if self.is_bit_set(data, NesFlags::Carry) {
+                self.flag_set(NesFlags::Carry);
+                result = result | NesFlags::Negative as u8;
+            } else {
+                self.flag_clear(NesFlags::Carry);
+            }
+
+            self.update_zero_and_negative_flags(result);
+        }
     }
 
     fn and(&mut self, mode: &AddressingMode) {
@@ -553,7 +785,8 @@ impl CPU {
     }
 
     fn jmp(&mut self, mode: &AddressingMode) {
-        todo!()
+        let addr = self.get_operand_address(mode);
+        self.pc = addr;
     }
 
     // This is a read-modify-write instruction,
@@ -579,11 +812,57 @@ impl CPU {
     }
 
     fn adc(&mut self, mode: &AddressingMode) {
-        todo!()
+        let addr = self.get_operand_address(mode);
+        let value = self.mem_read(addr);
+        let mut carry_value = 0;
+
+        if self.is_flag_set(NesFlags::Carry) {
+            carry_value = 1;
+        }
+
+        let result = self.a.wrapping_add(value).wrapping_add(carry_value);
+
+        if self.a + value + carry_value > 0xff {
+            self.flag_set(NesFlags::Carry);
+        } else {
+            self.flag_clear(NesFlags::Carry);
+        }
+
+        let overflow_check = ((result ^ self.a) & (result ^ value) & 0x80) != 0;
+
+        if overflow_check {
+            self.flag_set(NesFlags::Overflow);
+        } else {
+            self.flag_clear(NesFlags::Overflow);
+        }
+        self.update_zero_and_negative_flags(result);
     }
 
     fn sbc(&mut self, mode: &AddressingMode) {
-        todo!()
+        let addr = self.get_operand_address(mode);
+        let value = self.mem_read(addr);
+        let mut carry_value = 0;
+
+        if self.is_flag_set(NesFlags::Carry) {
+            carry_value = 1;
+        }
+
+        let result = self.a + !value + carry_value;
+
+        if !(result < 0x0) {
+            self.flag_set(NesFlags::Carry);
+        } else {
+            self.flag_clear(NesFlags::Carry);
+        }
+
+        self.update_zero_and_negative_flags(result);
+
+        let overflow_check = (result ^ self.a) & (result ^ !value) & 0x80 != 0;
+        if overflow_check {
+            self.flag_set(NesFlags::Overflow);
+        } else {
+            self.flag_clear(NesFlags::Overflow);
+        }
     }
 
     fn ldx(&mut self, mode: &AddressingMode) {
@@ -672,6 +951,18 @@ impl CPU {
                 let deref = deref_base.wrapping_add(self.y as u16);
                 deref
             }
+            AddressingMode::Indirect => {
+                let ptr = self.mem_read_u16(self.pc);
+
+                let lo = self.mem_read(ptr);
+                let hi = if ptr & 0x00ff == 0x00ff {
+                    self.mem_read(ptr & 0xff00)
+                } else {
+                    self.mem_read(ptr + 1)
+                };
+
+                (hi as u16) << 8 | (lo as u16)
+            }
             AddressingMode::NoneAddressing => {
                 panic!("mode does not exist");
             }
@@ -734,5 +1025,33 @@ mod test {
         cpu.load_and_run(vec![0xa5, 0x10, 0x00]);
 
         assert_eq!(cpu.a, 0x55);
+    }
+
+    #[test]
+    fn test_adc_immediate_no_carry() {
+        let mut cpu = CPU::new();
+        cpu.a = 10;
+        cpu.flag_clear(NesFlags::Carry);
+        cpu.load_and_run(vec![0x69, 5, 0x00]); // ADC #$05
+        assert_eq!(cpu.a, 15);
+    }
+
+    #[test]
+    fn test_adc_immediate_with_carry() {
+        let mut cpu = CPU::new();
+        cpu.a = 10;
+        cpu.flag_set(NesFlags::Carry);
+        cpu.load_and_run(vec![0x69, 5, 0x00]); // ADC #$05
+        assert_eq!(cpu.a, 16);
+    }
+
+    #[test]
+    fn test_adc_result_sets_carry_flag() {
+        let mut cpu = CPU::new();
+        cpu.a = 250;
+        cpu.flag_clear(NesFlags::Carry);
+        cpu.load_and_run(vec![0x69, 10, 0x00]); // 250 + 10 = 260 → wraps to 4, carry set
+        assert_eq!(cpu.a, 4);
+        assert!(cpu.is_flag_set(NesFlags::Carry));
     }
 }
