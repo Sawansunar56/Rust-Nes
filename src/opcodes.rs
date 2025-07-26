@@ -1,5 +1,5 @@
 use std::sync::LazyLock;
-use std::{collections::HashMap, hash::Hash};
+use std::{collections::HashMap};
 
 use crate::cpu::AddressingMode;
 

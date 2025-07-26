@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::opcodes::{self, OpCode, OPCODES_MAP};
+use crate::opcodes::{OpCode, OPCODES_MAP};
 
 pub struct CPU {
     a: u8,
@@ -32,13 +32,17 @@ pub enum AddressingMode {
 enum NesFlags {
     Carry = 0b0000_0001,
     Zero = 0b0000_0010,
+    #[allow(dead_code)]
     InterruptDisable = 0b0000_0100,
     Decimal = 0b0000_1000,
+    #[allow(dead_code)]
     FourthBit = 0b0001_0000,
+    #[allow(dead_code)]
     FifthBit = 0b0010_0000,
     Overflow = 0b0100_0000,
     Negative = 0b1000_0000,
 }
+
 impl CPU {
     pub fn new() -> Self {
         CPU {
@@ -109,20 +113,19 @@ impl CPU {
         self.mem_write_u16(0xfffc, 0x8000);
     }
 
-    fn load_and_run(&mut self, program: Vec<u8>) {
+    pub fn load_and_run(&mut self, program: Vec<u8>) {
         self.load(program);
         self.reset();
         self.run();
     }
 
-    pub fn run(&mut self) {
+    fn run(&mut self) {
         let opcodes: &HashMap<u8, &'static OpCode> = &*OPCODES_MAP;
 
         loop {
             let cur_op = self.mem_read(self.pc);
             self.pc += 1;
             let pc_state = self.pc;
-            println!("HERE: {:x}, PC: {:x}", cur_op, self.pc);
 
             let opcode = opcodes
                 .get(&cur_op)
@@ -294,6 +297,7 @@ impl CPU {
                 0xEA => {
                     self.nop();
                 }
+                0x00 => return,
                 _ => todo!(),
             }
 
@@ -370,10 +374,12 @@ impl CPU {
         self.y -= 1;
         self.update_zero_and_negative_flags(self.x);
     }
+
     fn is_bit_set(&self, value: u8, bit_pos: NesFlags) -> bool {
         value & (bit_pos as u8) != 0
     }
 
+    #[allow(dead_code)]
     fn is_bit_clear(&self, value: u8, bit_pos: NesFlags) -> bool {
         value & (bit_pos as u8) == 0
     }
@@ -391,7 +397,7 @@ impl CPU {
     }
 
     fn flag_clear(&mut self, bit_pos: NesFlags) {
-        self.stat_reg = self.stat_reg & bit_pos as u8;
+        self.stat_reg = self.stat_reg & !(bit_pos as u8);
     }
     fn bcc(&mut self) {
         let offset = self.mem_read(self.pc + 1) as i8;
@@ -598,6 +604,11 @@ impl CPU {
     }
 
     fn rol(&mut self, mode: &AddressingMode) {
+        let need_switch = if self.is_flag_set(NesFlags::Carry) {
+            true
+        } else {
+            false
+        };
         if let AddressingMode::Accumulator = mode {
             if self.is_bit_set(self.a, NesFlags::Negative) {
                 self.flag_set(NesFlags::Carry);
@@ -606,8 +617,9 @@ impl CPU {
             }
 
             self.a = self.a << 1;
-            if self.is_flag_set(NesFlags::Carry) {
-                self.a = self.a | NesFlags::Carry as u8;
+
+            if need_switch {
+                self.a += 1;
             }
 
             self.update_zero_and_negative_flags(self.a);
@@ -616,11 +628,14 @@ impl CPU {
             let data = self.mem_read(addr);
             let mut result = data << 1;
 
+            if need_switch {
+                result += 1;
+            }
+
             self.mem_write(addr, result);
 
             if self.is_bit_set(data, NesFlags::Negative) {
                 self.flag_set(NesFlags::Carry);
-                result = result | NesFlags::Carry as u8;
             } else {
                 self.flag_clear(NesFlags::Carry);
             }
@@ -630,6 +645,11 @@ impl CPU {
     }
 
     fn ror(&mut self, mode: &AddressingMode) {
+        let need_switch = if self.is_flag_set(NesFlags::Carry) {
+            true
+        } else {
+            false
+        };
         if let AddressingMode::Accumulator = mode {
             if self.is_bit_set(self.a, NesFlags::Carry) {
                 self.flag_set(NesFlags::Carry);
@@ -638,8 +658,9 @@ impl CPU {
             }
 
             self.a = self.a >> 1;
-            if self.is_flag_set(NesFlags::Carry) {
-                self.a = self.a | NesFlags::Carry as u8;
+
+            if need_switch {
+                self.a |= NesFlags::Negative as u8;
             }
 
             self.update_zero_and_negative_flags(self.a);
@@ -648,11 +669,14 @@ impl CPU {
             let data = self.mem_read(addr);
             let mut result = data >> 1;
 
+            if need_switch {
+                result |= NesFlags::Negative as u8;
+            }
+
             self.mem_write(addr, result);
 
             if self.is_bit_set(data, NesFlags::Carry) {
                 self.flag_set(NesFlags::Carry);
-                result = result | NesFlags::Negative as u8;
             } else {
                 self.flag_clear(NesFlags::Carry);
             }
@@ -798,17 +822,21 @@ impl CPU {
     fn inc(&mut self, mode: &AddressingMode) {
         let addr = self.get_operand_address(mode);
         let value = self.mem_read(addr);
-        self.mem_write(addr, value + 1);
+        let result = value.wrapping_add(1);
+        self.mem_write(addr, result);
 
-        self.update_zero_and_negative_flags(value + 1);
+        self.update_zero_and_negative_flags(result);
+        // println!("updated value: {:x},value: {:x}, {}", self.mem_read(addr),value,self.stat_reg);
+        // println!("updated value: {:b}", self.mem_read(addr));
     }
 
     fn dec(&mut self, mode: &AddressingMode) {
         let addr = self.get_operand_address(mode);
         let value = self.mem_read(addr);
-        self.mem_write(addr, value - 1);
+        let result = value.wrapping_sub(1);
+        self.mem_write(addr, result);
 
-        self.update_zero_and_negative_flags(value - 1);
+        self.update_zero_and_negative_flags(result);
     }
 
     fn adc(&mut self, mode: &AddressingMode) {
@@ -821,8 +849,9 @@ impl CPU {
         }
 
         let result = self.a.wrapping_add(value).wrapping_add(carry_value);
+        let overflow_result = self.a as u16 + value as u16 + carry_value as u16;
 
-        if self.a + value + carry_value > 0xff {
+        if overflow_result > 0xff {
             self.flag_set(NesFlags::Carry);
         } else {
             self.flag_clear(NesFlags::Carry);
@@ -835,21 +864,24 @@ impl CPU {
         } else {
             self.flag_clear(NesFlags::Overflow);
         }
+        self.a = result;
         self.update_zero_and_negative_flags(result);
     }
 
     fn sbc(&mut self, mode: &AddressingMode) {
         let addr = self.get_operand_address(mode);
         let value = self.mem_read(addr);
-        let mut carry_value = 0;
+        let carry_value = if self.is_flag_set(NesFlags::Carry) {
+            1
+        } else {
+            0
+        };
 
-        if self.is_flag_set(NesFlags::Carry) {
-            carry_value = 1;
-        }
+        let sum = self.a as u16 + (!value).wrapping_add(1) as u16 + carry_value as u16 - 1;
 
-        let result = self.a + !value + carry_value;
+        let result = sum as u8;
 
-        if !(result < 0x0) {
+        if self.a as u16 >= value as u16 + (1 - carry_value) {
             self.flag_set(NesFlags::Carry);
         } else {
             self.flag_clear(NesFlags::Carry);
@@ -863,6 +895,7 @@ impl CPU {
         } else {
             self.flag_clear(NesFlags::Overflow);
         }
+        self.a = result;
     }
 
     fn ldx(&mut self, mode: &AddressingMode) {
@@ -875,15 +908,15 @@ impl CPU {
 
     fn update_zero_and_negative_flags(&mut self, result: u8) {
         if result == 0 {
-            self.stat_reg = self.stat_reg | 0b00000010;
+            self.flag_set(NesFlags::Zero);
         } else {
-            self.stat_reg = self.stat_reg & 0b11111101;
+            self.flag_clear(NesFlags::Zero);
         }
 
-        if result & 0b1000000 != 0 {
-            self.stat_reg = self.stat_reg | 0b10000000;
+        if self.is_bit_set(result, NesFlags::Negative) {
+            self.flag_set(NesFlags::Negative);
         } else {
-            self.stat_reg = self.stat_reg & 0b01111111;
+            self.flag_clear(NesFlags::Negative);
         }
     }
 
@@ -976,6 +1009,23 @@ mod test {
     use super::*;
 
     #[test]
+    fn test_program_loads_to_0x8000() {
+        let mut cpu = CPU::new();
+
+        let program = vec![0xA9, 0x01, 0x8D, 0x00, 0x02];
+        cpu.load(program.clone());
+        cpu.reset();
+
+        for (i, byte) in program.iter().enumerate() {
+            assert_eq!(cpu.memory[0x8000 + i], *byte);
+        }
+
+        assert_eq!(cpu.memory[0xFFFC], 0x00); // low byte
+        assert_eq!(cpu.memory[0xFFFD], 0x80); // high byte
+        assert_eq!(cpu.pc, 0x8000); // high byte
+    }
+
+    #[test]
     fn test_lda_0xa9_op_immediate_load() {
         let mut cpu = CPU::new();
         cpu.load_and_run(vec![0xa9, 0x05, 0x00]);
@@ -992,10 +1042,45 @@ mod test {
     }
 
     #[test]
+    fn test_txa_0x8a() {
+        let mut cpu = CPU::new();
+        cpu.load(vec![0x8a, 0x00]);
+        cpu.reset();
+        cpu.x = 10;
+        cpu.run();
+
+        assert_eq!(cpu.a, 10);
+    }
+
+    #[test]
+    fn test_tay_0xa8() {
+        let mut cpu = CPU::new();
+        cpu.load(vec![0xa8, 0x00]);
+        cpu.reset();
+        cpu.a = 10;
+        cpu.run();
+
+        assert_eq!(cpu.y, 10);
+    }
+
+    #[test]
+    fn test_tya_0x98() {
+        let mut cpu = CPU::new();
+        cpu.load(vec![0x98, 0x00]);
+        cpu.reset();
+        cpu.y = 10;
+        cpu.run();
+
+        assert_eq!(cpu.a, 10);
+    }
+
+    #[test]
     fn test_tax_0xaa() {
         let mut cpu = CPU::new();
+        cpu.load(vec![0xaa, 0x00]);
+        cpu.reset();
         cpu.a = 10;
-        cpu.load_and_run(vec![0xaa, 0x00]);
+        cpu.run();
 
         assert_eq!(cpu.x, 10);
     }
@@ -1003,10 +1088,9 @@ mod test {
     #[test]
     fn test_inx_0xe8_increment_to_x() {
         let mut cpu = CPU::new();
-        cpu.x = 10;
         cpu.load_and_run(vec![0xe8, 0x00]);
 
-        assert_eq!(cpu.x, 11);
+        assert_eq!(cpu.x, 1);
     }
 
     #[test]
@@ -1030,28 +1114,584 @@ mod test {
     #[test]
     fn test_adc_immediate_no_carry() {
         let mut cpu = CPU::new();
+        cpu.load(vec![0x69, 5, 0x00]);
+        cpu.reset();
         cpu.a = 10;
         cpu.flag_clear(NesFlags::Carry);
-        cpu.load_and_run(vec![0x69, 5, 0x00]); // ADC #$05
+        cpu.run();
+
         assert_eq!(cpu.a, 15);
     }
 
     #[test]
     fn test_adc_immediate_with_carry() {
         let mut cpu = CPU::new();
+        cpu.load(vec![0x69, 5, 0x00]); // ADC #$05
+        cpu.reset();
         cpu.a = 10;
         cpu.flag_set(NesFlags::Carry);
-        cpu.load_and_run(vec![0x69, 5, 0x00]); // ADC #$05
+        cpu.run();
         assert_eq!(cpu.a, 16);
     }
 
     #[test]
     fn test_adc_result_sets_carry_flag() {
         let mut cpu = CPU::new();
+        cpu.load(vec![0x69, 10, 0x00]); // 250 + 10 = 260 → wraps to 4, carry set
+        cpu.reset();
         cpu.a = 250;
         cpu.flag_clear(NesFlags::Carry);
-        cpu.load_and_run(vec![0x69, 10, 0x00]); // 250 + 10 = 260 → wraps to 4, carry set
+        cpu.run();
+
         assert_eq!(cpu.a, 4);
-        assert!(cpu.is_flag_set(NesFlags::Carry));
+        assert_eq!(cpu.is_flag_set(NesFlags::Carry), true);
+    }
+
+    #[test]
+    fn test_sbc_immediate_no_borrow() {
+        let mut cpu = CPU::new();
+        cpu.load(vec![0xE9, 5, 0x00]); // SBC #$05
+        cpu.reset();
+        cpu.a = 10;
+        cpu.flag_set(NesFlags::Carry); // no borrow
+        cpu.run();
+
+        assert_eq!(cpu.a, 5);
+    }
+
+    #[test]
+    fn test_sbc_immediate_with_borrow() {
+        let mut cpu = CPU::new();
+        cpu.load(vec![0xE9, 5, 0x00]); // SBC #$05
+        cpu.reset();
+        cpu.a = 10;
+        cpu.flag_clear(NesFlags::Carry); // borrow → subtract 1 more
+        cpu.run();
+
+        assert_eq!(cpu.a, 4);
+    }
+
+    #[test]
+    fn test_sbc_result_sets_carry_flag() {
+        let mut cpu = CPU::new();
+        cpu.load(vec![0xE9, 5, 0x00]); // SBC #$05
+        cpu.reset();
+        cpu.a = 10;
+        cpu.flag_set(NesFlags::Carry); // no borrow
+        cpu.run();
+
+        // Carry should be set → no borrow occurred
+        assert_eq!(cpu.is_flag_set(NesFlags::Carry), true);
+    }
+
+    #[test]
+    fn test_sbc_result_clears_carry_flag_on_borrow() {
+        let mut cpu = CPU::new();
+        cpu.load(vec![0xE9, 20, 0x00]); // SBC #$14
+        cpu.reset();
+        cpu.a = 10;
+        cpu.flag_set(NesFlags::Carry); // subtract with no extra 1
+        cpu.run();
+
+        // Result will wrap around (underflow): 10 - 20 = -10 → 246 (u8)
+        assert_eq!(cpu.a, 246);
+        assert_eq!(cpu.is_flag_set(NesFlags::Carry), false); // borrow occurred
+    }
+
+    #[test]
+    fn test_inc() {
+        let mut cpu = CPU::new();
+        cpu.load(vec![0xE9, 20, 0x00]); // SBC #$14
+        cpu.reset();
+        cpu.run();
+    }
+
+    #[test]
+    fn test_inc_zero_page_basic() {
+        let mut cpu = CPU::new();
+        cpu.load(vec![
+            0xA9, 0x01, // LDA #$01
+            0x85, 0x10, // STA $10
+            0xE6, 0x10, // INC $10
+            0x00, // BRK
+        ]);
+        cpu.reset();
+        cpu.run();
+
+        // $10 should now contain 0x02
+        assert_eq!(cpu.mem_read(0x0010), 0x02);
+        assert_eq!(cpu.is_flag_set(NesFlags::Zero), false);
+        assert_eq!(cpu.is_flag_set(NesFlags::Negative), false);
+    }
+
+    #[test]
+    fn test_inc_sets_zero_flag() {
+        let mut cpu = CPU::new();
+        cpu.mem_write(0x10, 0xFF); // Wraparound will cause zero
+        cpu.load(vec![
+            0xE6, 0x10, // INC $10
+            0x00,
+        ]);
+        cpu.reset();
+        cpu.run();
+
+        assert_eq!(cpu.mem_read(0x0010), 0x00); // 0xFF + 1 wraps to 0x00
+        assert_eq!(cpu.is_flag_set(NesFlags::Zero), true);
+    }
+
+    #[test]
+    fn test_inc_sets_negative_flag() {
+        let mut cpu = CPU::new();
+        cpu.mem_write(0x10, 0x7F); // 0x7F + 1 = 0x80 (bit 7 set)
+        cpu.load(vec![
+            0xE6, 0x10, // INC $10
+            0x00,
+        ]);
+        cpu.reset();
+        cpu.run();
+
+        assert_eq!(cpu.mem_read(0x0010), 0x80);
+        assert_eq!(cpu.is_flag_set(NesFlags::Negative), true);
+    }
+
+    #[test]
+    fn test_asl_accumulator_no_carry() {
+        let mut cpu = CPU::new();
+        cpu.load(vec![
+            0xA9,
+            0b0010_0000, // LDA #$20
+            0x0A,        // ASL A
+            0x00,
+        ]);
+        cpu.reset();
+        cpu.run();
+
+        assert_eq!(cpu.a, 0b0100_0000);
+        assert_eq!(cpu.is_flag_set(NesFlags::Carry), false);
+        assert_eq!(cpu.is_flag_set(NesFlags::Zero), false);
+        assert_eq!(cpu.is_flag_set(NesFlags::Negative), false);
+    }
+
+    #[test]
+    fn test_asl_accumulator_with_carry() {
+        let mut cpu = CPU::new();
+        cpu.load(vec![
+            0xA9,
+            0b1000_0000, // LDA #$80
+            0x0A,        // ASL A
+            0x00,
+        ]);
+        cpu.reset();
+        cpu.run();
+
+        assert_eq!(cpu.a, 0x00); // shifted out 1 becomes carry, result is 0
+        assert_eq!(cpu.is_flag_set(NesFlags::Carry), true);
+        assert_eq!(cpu.is_flag_set(NesFlags::Zero), true);
+        assert_eq!(cpu.is_flag_set(NesFlags::Negative), false);
+    }
+
+    #[test]
+    fn test_asl_sets_negative_flag() {
+        let mut cpu = CPU::new();
+        cpu.load(vec![
+            0xA9,
+            0b0100_0000, // LDA #$40
+            0x0A,        // ASL A → 0x80
+            0x00,
+        ]);
+        cpu.reset();
+        cpu.run();
+
+        assert_eq!(cpu.a, 0x80);
+        assert_eq!(cpu.is_flag_set(NesFlags::Negative), true);
+        assert_eq!(cpu.is_flag_set(NesFlags::Carry), false);
+    }
+
+    #[test]
+    fn test_asl_zero_page_memory() {
+        let mut cpu = CPU::new();
+        cpu.mem_write(0x10, 0b0100_0000);
+        cpu.load(vec![
+            0x06, 0x10, // ASL $10
+            0x00,
+        ]);
+        cpu.reset();
+        cpu.run();
+
+        assert_eq!(cpu.mem_read(0x10), 0b1000_0000);
+        assert_eq!(cpu.is_flag_set(NesFlags::Negative), true);
+    }
+
+    #[test]
+    fn test_asl_zero_page_sets_carry() {
+        let mut cpu = CPU::new();
+        cpu.mem_write(0x10, 0b1000_0001);
+        cpu.load(vec![
+            0x06, 0x10, // ASL $10
+            0x00,
+        ]);
+        cpu.reset();
+        cpu.run();
+
+        assert_eq!(cpu.mem_read(0x10), 0b0000_0010); // left shift with wrap
+        assert_eq!(cpu.is_flag_set(NesFlags::Carry), true);
+    }
+
+    #[test]
+    fn test_asl_result_is_zero() {
+        let mut cpu = CPU::new();
+        cpu.mem_write(0x10, 0x00);
+        cpu.load(vec![
+            0x06, 0x10, // ASL $10
+            0x00,
+        ]);
+        cpu.reset();
+        cpu.run();
+
+        assert_eq!(cpu.mem_read(0x10), 0x00);
+        assert_eq!(cpu.is_flag_set(NesFlags::Zero), true);
+    }
+
+    #[test]
+    fn test_lsr_accumulator_no_carry() {
+        let mut cpu = CPU::new();
+        cpu.load(vec![
+            0xA9,
+            0b0000_0010, // LDA #$02
+            0x4A,        // LSR A
+            0x00,
+        ]);
+        cpu.reset();
+        cpu.run();
+
+        assert_eq!(cpu.a, 0b0000_0001);
+        assert_eq!(cpu.is_flag_set(NesFlags::Carry), false);
+        assert_eq!(cpu.is_flag_set(NesFlags::Zero), false);
+        assert_eq!(cpu.is_flag_set(NesFlags::Negative), false);
+    }
+
+    #[test]
+    fn test_lsr_accumulator_sets_carry() {
+        let mut cpu = CPU::new();
+        cpu.load(vec![
+            0xA9,
+            0b0000_0001, // LDA #$01
+            0x4A,        // LSR A
+            0x00,
+        ]);
+        cpu.reset();
+        cpu.run();
+
+        assert_eq!(cpu.a, 0x00); // shifted to 0
+        assert_eq!(cpu.is_flag_set(NesFlags::Carry), true); // bit 0 was 1
+        assert_eq!(cpu.is_flag_set(NesFlags::Zero), true);
+        assert_eq!(cpu.is_flag_set(NesFlags::Negative), false);
+    }
+    #[test]
+    fn test_lsr_zero_result_sets_zero_flag() {
+        let mut cpu = CPU::new();
+        cpu.load(vec![
+            0xA9, 0x00, 0x4A, // LSR A
+            0x00,
+        ]);
+        cpu.reset();
+        cpu.run();
+
+        assert_eq!(cpu.a, 0x00);
+        assert_eq!(cpu.is_flag_set(NesFlags::Zero), true);
+        assert_eq!(cpu.is_flag_set(NesFlags::Carry), false);
+    }
+    #[test]
+    fn test_lsr_zero_page() {
+        let mut cpu = CPU::new();
+        cpu.mem_write(0x10, 0b0000_0100);
+        cpu.load(vec![
+            0x46, 0x10, // LSR $10
+            0x00,
+        ]);
+        cpu.reset();
+        cpu.run();
+
+        assert_eq!(cpu.mem_read(0x10), 0b0000_0010);
+        assert_eq!(cpu.is_flag_set(NesFlags::Carry), false);
+    }
+    #[test]
+    fn test_lsr_memory_sets_carry() {
+        let mut cpu = CPU::new();
+        cpu.mem_write(0x10, 0b0000_0001);
+        cpu.load(vec![
+            0x46, 0x10, // LSR $10
+            0x00,
+        ]);
+        cpu.reset();
+        cpu.run();
+
+        assert_eq!(cpu.mem_read(0x10), 0x00);
+        assert_eq!(cpu.is_flag_set(NesFlags::Carry), true);
+        assert_eq!(cpu.is_flag_set(NesFlags::Zero), true);
+    }
+    #[test]
+    fn test_lsr_negative_flag_is_always_cleared() {
+        let mut cpu = CPU::new();
+        cpu.load(vec![
+            0xA9, 0xFF, // LDA #$FF
+            0x4A, // LSR A
+            0x00,
+        ]);
+        cpu.reset();
+        cpu.run();
+
+        assert_eq!(cpu.is_flag_set(NesFlags::Negative), false);
+    }
+
+    #[test]
+    fn test_rol_accumulator_no_carry() {
+        let mut cpu = CPU::new();
+        cpu.load(vec![
+            0xA9,
+            0b0011_0000, // LDA #$30
+            0x2A,        // ROL A
+            0x00,
+        ]);
+        cpu.reset();
+        cpu.flag_clear(NesFlags::Carry);
+        cpu.run();
+
+        assert_eq!(cpu.a, 0b0110_0000);
+        assert_eq!(cpu.is_flag_set(NesFlags::Carry), false);
+        assert_eq!(cpu.is_flag_set(NesFlags::Zero), false);
+        assert_eq!(cpu.is_flag_set(NesFlags::Negative), false);
+    }
+    #[test]
+    fn test_rol_accumulator_with_carry_in() {
+        let mut cpu = CPU::new();
+        cpu.load(vec![
+            0xA9,
+            0b0011_0000,
+            0x2A, // ROL A
+            0x00,
+        ]);
+        cpu.reset();
+        cpu.flag_set(NesFlags::Carry);
+        cpu.run();
+
+        assert_eq!(cpu.a, 0b0110_0001); // 0b0110_0000 | carry-in
+    }
+
+    #[test]
+    fn test_rol_accumulator_sets_carry() {
+        let mut cpu = CPU::new();
+        cpu.load(vec![
+            0xA9,
+            0b1000_0000, // LDA #$80
+            0x2A,
+            0x00,
+        ]);
+        cpu.reset();
+        cpu.flag_clear(NesFlags::Carry);
+        cpu.run();
+
+        assert_eq!(cpu.a, 0b0000_0000);
+        assert_eq!(cpu.is_flag_set(NesFlags::Carry), true);
+        assert_eq!(cpu.is_flag_set(NesFlags::Zero), true);
+    }
+    #[test]
+    fn test_rol_sets_negative_flag() {
+        let mut cpu = CPU::new();
+        cpu.load(vec![
+            0xA9,
+            0b0100_0000, // LDA #$40
+            0x2A,
+            0x00,
+        ]);
+        cpu.reset();
+        cpu.flag_clear(NesFlags::Carry);
+        cpu.run();
+
+        assert_eq!(cpu.a, 0b1000_0000);
+        assert_eq!(cpu.is_flag_set(NesFlags::Negative), true);
+    }
+
+    #[test]
+    fn test_rol_zero_page() {
+        let mut cpu = CPU::new();
+        cpu.mem_write(0x10, 0b0100_0000);
+        cpu.load(vec![
+            0x26, 0x10, // ROL $10
+            0x00,
+        ]);
+        cpu.reset();
+        cpu.flag_clear(NesFlags::Carry);
+        cpu.run();
+
+        assert_eq!(cpu.mem_read(0x10), 0b1000_0000);
+        assert_eq!(cpu.is_flag_set(NesFlags::Carry), false);
+        assert_eq!(cpu.is_flag_set(NesFlags::Negative), true);
+    }
+    #[test]
+    fn test_rol_memory_with_carry_in_and_out() {
+        let mut cpu = CPU::new();
+        cpu.mem_write(0x10, 0b1000_0000); // bit 7 set
+        cpu.load(vec![
+            0x26, 0x10, // ROL $10
+            0x00,
+        ]);
+        cpu.reset();
+        cpu.flag_set(NesFlags::Carry); // set carry in
+        cpu.run();
+
+        assert_eq!(cpu.mem_read(0x10), 0b0000_0001); // carry in to bit 0
+        assert_eq!(cpu.is_flag_set(NesFlags::Carry), true); // carry out
+    }
+
+    #[test]
+    fn test_ror_accumulator_no_carry() {
+        let mut cpu = CPU::new();
+        cpu.load(vec![
+            0xA9,
+            0b0000_0010, // LDA #$02
+            0x6A,        // ROR A
+            0x00,
+        ]);
+        cpu.reset();
+        cpu.flag_clear(NesFlags::Carry);
+        cpu.run();
+
+        assert_eq!(cpu.a, 0b0000_0001); // Shift right, bit 0 was 0, carry in was 0
+        assert_eq!(cpu.is_flag_set(NesFlags::Carry), false); // bit 0 was not set
+        assert_eq!(cpu.is_flag_set(NesFlags::Zero), false);
+        assert_eq!(cpu.is_flag_set(NesFlags::Negative), false);
+    }
+
+    #[test]
+    fn test_ror_accumulator_with_carry_in() {
+        let mut cpu = CPU::new();
+        cpu.load(vec![
+            0xA9,
+            0b0000_0010, // LDA #$02
+            0x6A,        // ROR A
+            0x00,
+        ]);
+        cpu.reset();
+        cpu.flag_set(NesFlags::Carry); // carry in
+        cpu.run();
+
+        assert_eq!(cpu.a, 0b1000_0001); // carry into bit 7
+    }
+
+    #[test]
+    fn test_ror_sets_carry_flag() {
+        let mut cpu = CPU::new();
+        cpu.load(vec![
+            0xA9,
+            0b0000_0001, // LDA #$01
+            0x6A,        // ROR A
+            0x00,
+        ]);
+        cpu.reset();
+        cpu.flag_clear(NesFlags::Carry);
+        cpu.run();
+
+        assert_eq!(cpu.a, 0b0000_0000); // shift drops bit 0, carry is set
+        assert_eq!(cpu.is_flag_set(NesFlags::Carry), true);
+        assert_eq!(cpu.is_flag_set(NesFlags::Zero), true);
+    }
+
+    #[test]
+    fn test_ror_sets_negative_flag() {
+        let mut cpu = CPU::new();
+        cpu.load(vec![
+            0xA9,
+            0b0000_0010,
+            0x6A, // ROR A
+            0x00,
+        ]);
+        cpu.reset();
+        cpu.flag_set(NesFlags::Carry); // cause bit 7 to be set
+        cpu.run();
+
+        assert_eq!(cpu.a, 0b1000_0001);
+        assert_eq!(cpu.is_flag_set(NesFlags::Negative), true);
+    }
+
+    #[test]
+    fn test_ror_zero_page() {
+        let mut cpu = CPU::new();
+        cpu.mem_write(0x10, 0b0000_0010);
+        cpu.load(vec![
+            0x66, 0x10, // ROR $10
+            0x00,
+        ]);
+        cpu.reset();
+        cpu.flag_clear(NesFlags::Carry);
+        cpu.run();
+
+        assert_eq!(cpu.mem_read(0x10), 0b0000_0001);
+        assert_eq!(cpu.is_flag_set(NesFlags::Carry), false);
+    }
+
+    #[test]
+    fn test_ror_memory_with_carry_in_and_out() {
+        let mut cpu = CPU::new();
+        cpu.mem_write(0x10, 0b0000_0001);
+        cpu.load(vec![
+            0x66, 0x10, // ROR $10
+            0x00,
+        ]);
+        cpu.reset();
+        cpu.flag_set(NesFlags::Carry);
+        cpu.run();
+
+        assert_eq!(cpu.mem_read(0x10), 0b1000_0000); // carry in into bit 7
+        assert_eq!(cpu.is_flag_set(NesFlags::Carry), true); // old bit 0 into carry
+        assert_eq!(cpu.is_flag_set(NesFlags::Negative), true);
+    }
+
+    #[test]
+    fn test_and() {
+        let mut cpu = CPU::new();
+        cpu.mem_write(0x10, 0b0000_0001);
+        cpu.load(vec![
+            0x25, 0x10, // ROR $10
+            0x00,
+        ]);
+        cpu.reset();
+        cpu.flag_set(NesFlags::Carry);
+        cpu.a = 0b0000_0001;
+        cpu.run();
+
+        assert_eq!(cpu.a, 0b0000_0001);
+    }
+
+    #[test]
+    fn test_or() {
+        let mut cpu = CPU::new();
+        cpu.mem_write(0x10, 0b1111_1110);
+        cpu.load(vec![
+            0x05, 0x10, // ROR $10
+            0x00,
+        ]);
+        cpu.reset();
+        cpu.flag_set(NesFlags::Carry);
+        cpu.a = 0b0000_0000;
+        cpu.run();
+
+        assert_eq!(cpu.a, 0b1111_1110);
+    }
+
+    #[test]
+    fn test_xor() {
+        let mut cpu = CPU::new();
+        cpu.mem_write(0x10, 0b1010_1010);
+        cpu.load(vec![
+            0x45, 0x10, // ROR $10
+            0x00,
+        ]);
+        cpu.reset();
+        cpu.flag_set(NesFlags::Carry);
+        cpu.a = 0b1111_0000;
+        cpu.run();
+
+        assert_eq!(cpu.a, 0b0101_1010);
     }
 }
