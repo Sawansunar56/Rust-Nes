@@ -10,6 +10,8 @@ pub struct CPU {
     sp: u8,
     pc: u16,
 
+    pub tick: u64,
+
     memory: [u8; 0xffff],
 }
 
@@ -43,24 +45,27 @@ enum NesFlags {
     Negative = 0b1000_0000,
 }
 
+const STACK_RESET: u8 = 0xfd;
+
 impl CPU {
     pub fn new() -> Self {
         CPU {
             a: 0,
-            sp: 0,
+            sp: STACK_RESET,
             pc: 0,
             x: 0,
             y: 0,
             stat_reg: 0,
+            tick: 0,
             memory: [0; 0xffff],
         }
     }
 
-    fn mem_read(&self, addr: u16) -> u8 {
+    pub fn mem_read(&self, addr: u16) -> u8 {
         self.memory[addr as usize]
     }
 
-    fn mem_write(&mut self, addr: u16, data: u8) {
+    pub fn mem_write(&mut self, addr: u16, data: u8) {
         self.memory[addr as usize] = data;
     }
 
@@ -92,25 +97,29 @@ impl CPU {
         let hi = self.mem_read(pos + 1) as u16;
         (hi << 8) | (lo as u16)
     }
-    fn mem_write_u16(&mut self, pos: u16, data: u16) {
+
+    pub fn mem_write_u16(&mut self, pos: u16, data: u16) {
         let hi = (data >> 8) as u8;
         let lo = (data & 0xff) as u8;
         self.mem_write(pos, lo);
         self.mem_write(pos + 1, hi);
     }
 
-    fn reset(&mut self) {
+    pub fn reset(&mut self) {
         self.a = 0;
         self.x = 0;
-        self.stat_reg = 0;
+        self.y = 0;
+        self.sp = STACK_RESET;
+        self.stat_reg |= 0b100100;
 
         self.pc = self.mem_read_u16(0xfffc);
     }
 
     // TODO: Make the current test pass.
-    fn load(&mut self, program: Vec<u8>) {
-        self.memory[0x8000..(0x8000 + program.len())].copy_from_slice(&program[..]);
-        self.mem_write_u16(0xfffc, 0x8000);
+    pub fn load(&mut self, program: Vec<u8>) {
+        let loc = 0x0600;
+        self.memory[loc..(loc + program.len())].copy_from_slice(&program[..]);
+        self.mem_write_u16(0xfffc, loc as u16);
     }
 
     pub fn load_and_run(&mut self, program: Vec<u8>) {
@@ -119,7 +128,10 @@ impl CPU {
         self.run();
     }
 
-    fn run(&mut self) {
+    pub fn run_with_callback<F>(&mut self, mut callback: F)
+    where
+        F: FnMut(&mut CPU),
+    {
         let opcodes: &HashMap<u8, &'static OpCode> = &*OPCODES_MAP;
 
         loop {
@@ -235,10 +247,21 @@ impl CPU {
                 _ => todo!(),
             }
 
+            println!(
+                "Program Counter: {:x}, Op: {:x}, Opcode: {}",
+                self.pc, opcode.instruction,opcode.instruction_name
+            );
+
             if pc_state == self.pc {
                 self.pc += (opcode.bytes - 1) as u16;
             }
+
+            callback(self);
         }
+    }
+
+    fn run(&mut self) {
+        self.run_with_callback(|_| {});
     }
 
     fn lda(&mut self, mode: &AddressingMode) {
