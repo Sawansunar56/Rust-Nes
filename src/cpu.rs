@@ -150,18 +150,10 @@ impl CPU {
                 0x84 | 0x94 | 0x8C => {
                     self.sty(&opcode.addressing_mode);
                 }
-                0xAA => {
-                    self.tax();
-                }
-                0x8A => {
-                    self.txa();
-                }
-                0xA8 => {
-                    self.tay();
-                }
-                0x98 => {
-                    self.tya();
-                }
+                0xAA => self.tax(),
+                0x8A => self.txa(),
+                0xA8 => self.tay(),
+                0x98 => self.tya(),
                 0x69 | 0x65 | 0x75 | 0x6D | 0x7D | 0x79 | 0x61 | 0x71 => {
                     self.adc(&opcode.addressing_mode);
                 }
@@ -174,18 +166,10 @@ impl CPU {
                 0xC6 | 0xD6 | 0xCE | 0xDE => {
                     self.dec(&opcode.addressing_mode);
                 }
-                0xE8 => {
-                    self.inx();
-                }
-                0xCA => {
-                    self.dex();
-                }
-                0xC8 => {
-                    self.iny();
-                }
-                0x88 => {
-                    self.dey();
-                }
+                0xE8 => self.inx(),
+                0xCA => self.dex(),
+                0xC8 => self.iny(),
+                0x88 => self.dey(),
                 0x0A | 0x06 | 0x16 | 0x0E | 0x1E => {
                     self.asl(&opcode.addressing_mode);
                 }
@@ -219,84 +203,34 @@ impl CPU {
                 0xC0 | 0xC4 | 0xCC => {
                     self.cpy(&opcode.addressing_mode);
                 }
-                0x90 => {
-                    self.bcc();
-                }
-                0xB0 => {
-                    self.bcs();
-                }
-                0xF0 => {
-                    self.beq();
-                }
-                0xD0 => {
-                    self.bne();
-                }
-                0x10 => {
-                    self.bpl();
-                }
-                0x30 => {
-                    self.bmi();
-                }
-                0x50 => {
-                    self.bvc();
-                }
-                0x70 => {
-                    self.bvs();
-                }
+                0x90 => self.bcc(),
+                0xB0 => self.bcs(),
+                0xF0 => self.beq(),
+                0xD0 => self.bne(),
+                0x10 => self.bpl(),
+                0x30 => self.bmi(),
+                0x50 => self.bvc(),
+                0x70 => self.bvs(),
                 0x4C | 0x6C => {
                     self.jmp(&opcode.addressing_mode);
                 }
-                0x20 => {
-                    self.jsr();
-                }
-                0x60 => {
-                    self.rts();
-                }
-                0x40 => {
-                    self.rti();
-                }
-                0x48 => {
-                    self.pha();
-                }
-                0x68 => {
-                    self.pla();
-                }
-                0x08 => {
-                    self.php();
-                }
-                0x28 => {
-                    self.plp();
-                }
-                0x9A => {
-                    self.txs();
-                }
-                0xBA => {
-                    self.tsx();
-                }
-                0x18 => {
-                    self.clc();
-                }
-                0x38 => {
-                    self.sec();
-                }
-                0x58 => {
-                    self.cli();
-                }
-                0x78 => {
-                    self.sei();
-                }
-                0xD8 => {
-                    self.cld();
-                }
-                0xF8 => {
-                    self.sed();
-                }
-                0xB8 => {
-                    self.clv();
-                }
-                0xEA => {
-                    self.nop();
-                }
+                0x20 => self.jsr(),
+                0x60 => self.rts(),
+                0x40 => self.rti(),
+                0x48 => self.pha(),
+                0x68 => self.pla(),
+                0x08 => self.php(),
+                0x28 => self.plp(),
+                0x9A => self.txs(),
+                0xBA => self.tsx(),
+                0x18 => self.clc(),
+                0x38 => self.sec(),
+                0x58 => self.cli(),
+                0x78 => self.sei(),
+                0xD8 => self.cld(),
+                0xF8 => self.sed(),
+                0xB8 => self.clv(),
+                0xEA => self.nop(),
                 0x00 => return,
                 _ => todo!(),
             }
