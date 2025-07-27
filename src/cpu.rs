@@ -3,12 +3,12 @@ use std::collections::HashMap;
 use crate::opcodes::{OpCode, OPCODES_MAP};
 
 pub struct CPU {
-    a: u8,
-    x: u8,
-    y: u8,
-    stat_reg: u8,
-    sp: u8,
-    pc: u16,
+    pub x: u8,
+    pub a: u8,
+    pub y: u8,
+    pub stat_reg: u8,
+    pub sp: u8,
+    pub pc: u16,
 
     pub tick: u64,
 
@@ -80,11 +80,10 @@ impl CPU {
     }
 
     fn stack_pop_u16(&mut self) -> u16 {
-        let lo = self.stack_pop();
-        let hi = self.stack_pop();
+        let lo = self.stack_pop() as u16;
+        let hi = self.stack_pop() as u16;
 
-        let addr = (hi as u16) << 8 | lo as u16;
-        addr
+        hi << 8 | lo
     }
 
     fn stack_push_u16(&mut self, data: u16) {
@@ -95,7 +94,7 @@ impl CPU {
     fn mem_read_u16(&mut self, pos: u16) -> u16 {
         let lo = self.mem_read(pos) as u16;
         let hi = self.mem_read(pos + 1) as u16;
-        (hi << 8) | (lo as u16)
+        (hi << 8) | (lo)
     }
 
     pub fn mem_write_u16(&mut self, pos: u16, data: u16) {
@@ -118,6 +117,7 @@ impl CPU {
     // TODO: Make the current test pass.
     pub fn load(&mut self, program: Vec<u8>) {
         let loc = 0x0600;
+        self.memory[0x30] = 172;
         self.memory[loc..(loc + program.len())].copy_from_slice(&program[..]);
         self.mem_write_u16(0xfffc, loc as u16);
     }
@@ -247,15 +247,22 @@ impl CPU {
                 _ => todo!(),
             }
 
-            println!(
-                "Program Counter: {:x}, Op: {:x}, Opcode: {}",
-                self.pc, opcode.instruction,opcode.instruction_name
-            );
-
             if pc_state == self.pc {
                 self.pc += (opcode.bytes - 1) as u16;
             }
 
+            #[cfg(debug_assertions)]
+            {
+                println!(
+                    "Program Counter: {:x}, Op: {:x} {:x} {:x}, Opcode: {}, Stack: {:x}",
+                    self.pc - 1,
+                    self.mem_read(self.pc - 1),
+                    self.mem_read(self.pc),
+                    self.mem_read(self.pc + 1),
+                    opcode.instruction_name,
+                    self.sp
+                );
+            }
             callback(self);
         }
     }
@@ -430,10 +437,11 @@ impl CPU {
     }
 
     fn jsr(&mut self) {
-        self.stack_push_u16(self.pc);
+        self.stack_push_u16(self.pc + 1);
         let addr = self.mem_read_u16(self.pc);
         self.pc = addr;
     }
+
     fn rts(&mut self) {
         let addr = self.stack_pop_u16();
         self.pc = addr.wrapping_add(1);
@@ -974,12 +982,12 @@ mod test {
         cpu.reset();
 
         for (i, byte) in program.iter().enumerate() {
-            assert_eq!(cpu.memory[0x8000 + i], *byte);
+            assert_eq!(cpu.memory[0x0600 + i], *byte);
         }
 
         assert_eq!(cpu.memory[0xFFFC], 0x00); // low byte
-        assert_eq!(cpu.memory[0xFFFD], 0x80); // high byte
-        assert_eq!(cpu.pc, 0x8000); // high byte
+        assert_eq!(cpu.memory[0xFFFD], 0x06); // high byte
+        assert_eq!(cpu.pc, 0x0600); // high byte
     }
 
     #[test]
@@ -1650,5 +1658,58 @@ mod test {
         cpu.run();
 
         assert_eq!(cpu.a, 0b0101_1010);
+    }
+
+    #[test]
+    fn test_jsr_sets_program_counter() {
+        let mut cpu = CPU::new();
+        cpu.load(vec![0x20, 0x05, 0x06]); // JSR $0605
+        cpu.reset();
+        cpu.run();
+        assert_eq!(cpu.pc - 1, 0x0605);
+    }
+
+    #[test]
+    fn test_jsr_pushes_return_address() {
+        let mut cpu = CPU::new();
+        cpu.load(vec![0x20, 0x05, 0x06]); // JSR $0605
+        cpu.reset();
+
+        let initial_sp = cpu.sp;
+        cpu.run();
+
+        let ret_hi = cpu.mem_read(0x0100 + (initial_sp as u16));
+        let ret_lo = cpu.mem_read(0x0100 + (initial_sp.wrapping_sub(1) as u16));
+        let return_address = ((ret_hi as u16) << 8) | (ret_lo as u16);
+
+        // PC should be pointing to 0x0605, so return address is 0x0002 (JSR was at 0x0000, len=3)
+        assert_eq!(return_address, 0x0602);
+    }
+
+    #[test]
+    fn test_jsr_stack_pointer_decrease() {
+        let mut cpu = CPU::new();
+        let initial_sp = cpu.sp;
+        cpu.load(vec![0x20, 0x05, 0x06]); // JSR $0605
+        cpu.reset();
+        cpu.run();
+
+        // Two bytes should be pushed: SP - 2
+        assert_eq!(cpu.sp, initial_sp.wrapping_sub(2));
+    }
+
+    #[test]
+    fn test_jsr_and_rts_work_together() {
+        let mut cpu = CPU::new();
+        cpu.load(vec![
+            0x20, 0x04, 0x06, // JSR $0606
+            0x00, // BRK (will not reach)
+            0x60, // RTS at $0606
+        ]);
+        cpu.reset();
+        cpu.run();
+
+        // It should jump to 0x0606, then RTS should return to 0x0003
+        assert_eq!(cpu.sp, 0xfd);
     }
 }

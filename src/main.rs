@@ -3,13 +3,13 @@ extern crate sdl2;
 pub mod cpu;
 pub mod opcodes;
 
+use rand::Rng;
 use sdl2::{
     event::Event,
     keyboard::Keycode,
     pixels::{Color, PixelFormatEnum},
     EventPump,
 };
-use rand::Rng;
 
 use crate::cpu::CPU;
 
@@ -143,6 +143,24 @@ fn main() {
         0x91, 0x00, 0x60, 0xa6, 0x03, 0xa9, 0x00, 0x81, 0x10, 0xa2, 0x00, 0xa9, 0x01, 0x81, 0x10,
         0x60, 0xa2, 0x00, 0xea, 0xea, 0xca, 0xd0, 0xfb, 0x60,
     ];
+    // cpu.load(vec![0x20, 0x05, 0x06]); // JSR $0605
+    // cpu.reset();
+    // let initial_sp = cpu.sp;
+
+    // cpu.run_with_callback(move |cpu| {
+    //     println!("\n\nProgram Counter: {:x}, Stack: {:x}", cpu.pc, cpu.sp);
+    // });
+    // let ret_hi = cpu.mem_read(0x0100 + (initial_sp as u16));
+    // let ret_lo = cpu.mem_read(0x0100 + (initial_sp.wrapping_sub(1) as u16));
+    // let return_address = ((ret_hi as u16) << 8) | (ret_lo as u16);
+    // println!(
+    //     "addr: {:4x}, lo: {:x}\naddr: {:4x}, hi: {:x}",
+    //     (0x100 + (initial_sp as u16)),
+    //     ret_lo,
+    //     (0x100 + (initial_sp.wrapping_sub(1) as u16)),
+    //     ret_hi,
+    // );
+    // return;
 
     cpu.load(game_code);
     cpu.reset();
@@ -172,6 +190,4 @@ fn main() {
 
         std::thread::sleep(std::time::Duration::new(0, 70_000));
     });
-
-    println!("Something");
 }
