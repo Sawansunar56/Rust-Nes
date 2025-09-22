@@ -136,12 +136,27 @@ impl CPU {
 
         loop {
             let cur_op = self.mem_read(self.pc);
+
             self.pc += 1;
             let pc_state = self.pc;
 
             let opcode = opcodes
                 .get(&cur_op)
                 .expect(&format!("OpCode {:x} is not recognized", cur_op));
+
+            #[cfg(debug_assertions)]
+            {
+                println!(
+                    "Program Counter: {:x}, Op: {:x} {:x} {:x}, Opcode: {}, Stack: {:x}, Flags: {:b}",
+                    self.pc - 1,
+                    self.mem_read(self.pc - 1),
+                    self.mem_read(self.pc),
+                    self.mem_read(self.pc + 1),
+                    opcode.instruction_name,
+                    self.sp,
+                    self.stat_reg
+                );
+            }
 
             match cur_op {
                 0xA9 | 0xA5 | 0xB5 | 0xAD | 0xBD | 0xB9 | 0xA1 | 0xB1 => {
@@ -243,6 +258,10 @@ impl CPU {
                 0xF8 => self.sed(),
                 0xB8 => self.clv(),
                 0xEA => self.nop(),
+                0x02 => {
+                    println!("Game Ended with KIL instruction at PC: {:04X}", self.pc);
+                    return;
+                }
                 0x00 => return,
                 _ => todo!(),
             }
@@ -251,18 +270,6 @@ impl CPU {
                 self.pc += (opcode.bytes - 1) as u16;
             }
 
-            #[cfg(debug_assertions)]
-            {
-                println!(
-                    "Program Counter: {:x}, Op: {:x} {:x} {:x}, Opcode: {}, Stack: {:x}",
-                    self.pc - 1,
-                    self.mem_read(self.pc - 1),
-                    self.mem_read(self.pc),
-                    self.mem_read(self.pc + 1),
-                    opcode.instruction_name,
-                    self.sp
-                );
-            }
             callback(self);
         }
     }
@@ -323,19 +330,19 @@ impl CPU {
     }
 
     fn inx(&mut self) {
-        self.x += 1;
+        self.x = self.x.wrapping_add(1);
         self.update_zero_and_negative_flags(self.x);
     }
     fn dex(&mut self) {
-        self.x -= 1;
+        self.x = self.x.wrapping_sub(1);
         self.update_zero_and_negative_flags(self.x);
     }
     fn iny(&mut self) {
-        self.y += 1;
+        self.y = self.y.wrapping_add(1);
         self.update_zero_and_negative_flags(self.x);
     }
     fn dey(&mut self) {
-        self.y -= 1;
+        self.y = self.y.wrapping_sub(1);
         self.update_zero_and_negative_flags(self.x);
     }
 
@@ -364,56 +371,56 @@ impl CPU {
         self.stat_reg = self.stat_reg & !(bit_pos as u8);
     }
     fn bcc(&mut self) {
-        let offset = self.mem_read(self.pc + 1) as i8;
+        let offset = self.mem_read(self.pc) as i8;
 
         if self.is_flag_clear(NesFlags::Carry) {
             // let new_pc = self.pc.wrapping_add(2).wrapping_add(offset as u16);
-            let new_pc = self.pc.wrapping_add(offset as u16);
+            let new_pc = self.pc.wrapping_add(1).wrapping_add(offset as u16);
             self.pc = new_pc;
         }
     }
     fn bcs(&mut self) {
-        let offset = self.mem_read(self.pc + 1) as i8;
+        let offset = self.mem_read(self.pc) as i8;
 
         if self.is_flag_set(NesFlags::Carry) {
             // let new_pc = self.pc.wrapping_add(2).wrapping_add(offset as u16);
-            let new_pc = self.pc.wrapping_add(offset as u16);
+            let new_pc = self.pc.wrapping_add(1).wrapping_add(offset as u16);
             self.pc = new_pc;
         }
     }
     fn beq(&mut self) {
-        let offset = self.mem_read(self.pc + 1) as i8;
+        let offset = self.mem_read(self.pc) as i8;
 
         if self.is_flag_set(NesFlags::Zero) {
             // let new_pc = self.pc.wrapping_add(2).wrapping_add(offset as u16);
-            let new_pc = self.pc.wrapping_add(offset as u16);
+            let new_pc = self.pc.wrapping_add(1).wrapping_add(offset as u16);
             self.pc = new_pc;
         }
     }
     fn bne(&mut self) {
-        let offset = self.mem_read(self.pc + 1) as i8;
+        let offset = self.mem_read(self.pc) as i8;
 
         if self.is_flag_clear(NesFlags::Zero) {
             // let new_pc = self.pc.wrapping_add(2).wrapping_add(offset as u16);
-            let new_pc = self.pc.wrapping_add(offset as u16);
+            let new_pc = self.pc.wrapping_add(1).wrapping_add(offset as u16);
             self.pc = new_pc;
         }
     }
     fn bpl(&mut self) {
-        let offset = self.mem_read(self.pc + 1) as i8;
+        let offset = self.mem_read(self.pc) as i8;
 
         if self.is_flag_clear(NesFlags::Negative) {
             // let new_pc = self.pc.wrapping_add(2).wrapping_add(offset as u16);
-            let new_pc = self.pc.wrapping_add(offset as u16);
+            let new_pc = self.pc.wrapping_add(1).wrapping_add(offset as u16);
             self.pc = new_pc;
         }
     }
     fn bmi(&mut self) {
-        let offset = self.mem_read(self.pc + 1) as i8;
+        let offset = self.mem_read(self.pc) as i8;
 
         if self.is_flag_set(NesFlags::Negative) {
             // let new_pc = self.pc.wrapping_add(2).wrapping_add(offset as u16);
-            let new_pc = self.pc.wrapping_add(offset as u16);
+            let new_pc = self.pc.wrapping_add(1).wrapping_add(offset as u16);
             self.pc = new_pc;
         }
     }
@@ -499,7 +506,7 @@ impl CPU {
         self.flag_clear(NesFlags::Overflow);
     }
     fn nop(&mut self) {
-        todo!()
+        // todo!()
     }
     fn asl(&mut self, mode: &AddressingMode) {
         if let AddressingMode::Accumulator = mode {

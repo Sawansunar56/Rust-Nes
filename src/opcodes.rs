@@ -32,6 +32,8 @@ impl OpCode {
 pub static CPU_OPS_CODES: LazyLock<Vec<OpCode>> = LazyLock::new(|| {
     vec![
         OpCode::new(0x00, "BRK", 1, 7, AddressingMode::NoneAddressing),
+        OpCode::new(0x02, "BRK", 1, 7, AddressingMode::NoneAddressing),
+        OpCode::new(0xea, "NOP", 1, 2, AddressingMode::NoneAddressing),
         // OpCode::new(0x00, "BRK", 2, 7, AddressingMode::Immediate),
         OpCode::new(0xA9, "LDA", 2, 2, AddressingMode::Immediate),
         OpCode::new(0xA5, "LDA", 2, 3, AddressingMode::ZeroPage),
